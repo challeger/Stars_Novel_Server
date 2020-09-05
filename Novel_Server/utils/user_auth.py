@@ -1,5 +1,6 @@
 #!/user/bin/env python
 # 每天都要有好心情
+# 用户登录验证模块
 import jwt
 from rest_framework import exceptions
 from rest_framework_jwt.authentication import BaseJSONWebTokenAuthentication, jwt_decode_handler
