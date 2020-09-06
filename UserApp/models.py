@@ -123,16 +123,17 @@ class Shelf(models.Model):
                                   shelf_title=shelf_title, user=user)
 
     @property
-    def books(self):
+    def spider(self):
         try:
             spider = globals()[SPIDERS[self.web_url]](self)
             # 判断是否登录
             if not spider.is_login:
                 spider.login()
-            data = spider.get_shelf()
         except KeyError:
-            data = None
-        return data
+            spider = None
+        except ValueError as e:
+            raise e
+        return spider
 
     class Meta:
         verbose_name = '书架'
