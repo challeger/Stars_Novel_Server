@@ -9,7 +9,7 @@ class IsOwnerToShelf(permissions.BasePermission):
 
     def has_permission(self, request, view):
         if request.user and request.user.is_authenticated:
-            shelf_id = request.query_params.get('shelf_id', None)
+            shelf_id = request.data.get('shelf_id', None)
             if request.user.user_shelf.filter(id=shelf_id):
                 return True
         return False
