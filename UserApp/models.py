@@ -29,10 +29,11 @@ class UserManager(BaseUserManager):
 
 # 用户表
 class NovelUser(AbstractBaseUser, PermissionsMixin):
+    GENDER_SET = {'男', '女', '保密'}
     GENDER_TYPE = (
-        ("0", "保密"),
-        ("1", "男"),
-        ("2", "女")
+        ("保密", "保密"),
+        ("男", "男"),
+        ("女", "女")
     )
     # 用户id
     uid = ShortUUIDField(primary_key=True)
@@ -54,6 +55,18 @@ class NovelUser(AbstractBaseUser, PermissionsMixin):
 
     def get_short_name(self):
         return self.nickname
+
+    def update_info(self, data):
+        gender = data.get('gender', self.gender)
+        self.email = data.get('email', self.email)
+        nickname = data.get('nickname', self.nickname)
+        if nickname != self.nickname and NovelUser.objects.filter(nickname=nickname):
+            raise ValueError('该昵称已存在!')
+        if gender not in self.GENDER_SET:
+            raise ValueError('不合法的数据')
+        self.nickname = nickname
+        self.gender = gender
+        self.save()
 
     def __str__(self):
         return self.nickname
@@ -77,7 +90,7 @@ class Shelf(models.Model):
         (URL_ZongHeng, '纵横中文网'),
         (URL_CiWeiMao, '刺猬猫'),
     )
-    account = models.CharField(verbose_name='网站账号', max_length=40, unique=True)
+    account = models.CharField(verbose_name='网站账号', max_length=40)
     password = models.CharField(verbose_name='网站密码', max_length=40)
     web_url = models.URLField(verbose_name='目标网站', choices=webs, default='https://www.qidian.com/')
     shelf_title = models.CharField(verbose_name='书架标题', default='我的书架', max_length=40)
@@ -96,7 +109,7 @@ class Shelf(models.Model):
         if web_url not in cls.URL_SET:
             raise ValueError('不合法的网址')
         # 判断账号是否已经使用
-        if user.user_shelf.filter(account=account):
+        if user.user_shelf.filter(account=account, web_url=web_url):
             raise ValueError('账号已在使用中!')
         # 判断书架标题是否已经存在
         if user.user_shelf.filter(shelf_title=shelf_title):
@@ -120,13 +133,16 @@ class Book(models.Model):
                                  default='http://alioss.youdubook.com/uploads/picturePlaceholder.jpg')
     book_last_chapter = models.CharField(verbose_name='最新章节', max_length=100, null=True)
     book_last_chapter_url = models.URLField(verbose_name='最新章节链接', null=True)
-    last_chapter = {
-        'name': None,
-        'url': None
-    }
 
     def __str__(self):
         return self.book_title
+
+    @property
+    def last_chapter(self):
+        return {
+            'title': self.book_last_chapter,
+            'url': self.book_last_chapter_url
+        }
 
     def read_history(self, shelf_id):
         return self.book_ship.filter(shelf__id=shelf_id)
