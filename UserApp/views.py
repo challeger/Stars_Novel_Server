@@ -172,24 +172,30 @@ class PasswordView(APIView):
         return Response(response)
 
 
+# 获取书架,如果有id就返回单个书架,否则返回用户的所有书架
+def get_shelf(request, shelf_id):
+    return request.user.user_shelf.all() if not shelf_id else request.user.user_shelf.filter(id=shelf_id)
+
+
 # 书架api get获取信息, put绑定书架, post修改书架信息
 class ShelfView(GenericAPIView):
     authentication_classes = (TokenAuthentication, )
-
-    def get_queryset(self):
-        user = self.request.user
-        return user.user_shelf.all()
 
     def get(self, request: Request):
         response = {
             'status': 2000,
             'msg': None,
         }
-        shelf_set = self.get_queryset()
+        shelf_id = request.data.get('shelf_id')
+        shelf_set = get_shelf(request, shelf_id)
         if shelf_set:
-            data = ShelfSerializer(shelf_set, many=True, context={'request': request}).data
-            response['msg'] = '获取书架信息成功'
-            response['data'] = data
+            try:
+                data = ShelfSerializer(shelf_set, many=True, context={'request': request}).data
+                response['msg'] = '获取书架信息成功'
+                response['data'] = data
+            except ValueError as e:
+                response['status'] = 2002
+                response['msg'] = str(e)
         else:
             response['status'] = 2001
             response['msg'] = '还没有绑定书架!快去绑定一个吧!'
@@ -255,3 +261,272 @@ class ShelfView(GenericAPIView):
         elif method == 'POST':
             permissions_classes = (IsOwnerToShelf, )
         return [permission() for permission in permissions_classes]
+
+
+class WalletView(APIView):
+    """
+    钱包接口
+    get: 获取书架中的代币余额.
+    """
+    authentication_classes = (TokenAuthentication, )
+    permissions_classes = (IsOwnerToShelf, )
+
+    def get(self, request):
+        response = {
+            'status': None,
+            'msg': None
+        }
+        data = dict()
+        shelf_id = request.data.get('shelf_id', None)
+        if not shelf_id:
+            shelf_set = request.user.user_shelf.all()
+        else:
+            shelf_set = request.user.user_shelf.filter(id=shelf_id)
+        try:
+            for shelf in shelf_set:
+                if shelf.spider:
+                    data[shelf.id] = {
+                        'shelf_id': shelf.id,
+                        'shelf_title': shelf.shelf_title,
+                        'wallet': shelf.spider.get_wallet()
+                    }
+            response['status'] = 2000
+            response['msg'] = '获取钱包信息成功!'
+            response['data'] = data
+        except ValueError as e:
+            response['status'] = 2002
+            response['msg'] = str(e)
+        return Response(response)
+
+
+class RankView(APIView):
+    """
+    排行榜数据接口
+    get: 获取排行榜信息, 当不传入shelf_id时,默认获取所有书架的排行榜
+    """
+    authentication_classes = (TokenAuthentication, )
+
+    def get(self, request):
+        response = {
+            'status': None,
+            'msg': None
+        }
+        rank_type = request.query_params.get('rank_type')
+        data_type = request.query_params.get('data_type')
+        page = request.query_params.get('page')
+        data = {}
+        shelf_id = request.data.get('shelf_id', None)
+        shelf_set = get_shelf(request, shelf_id)
+        try:
+            for shelf in shelf_set:
+                if shelf.spider:
+                    data[shelf.id] = {
+                        'shelf_id': shelf.id,
+                        'shelf_title': shelf.shelf_title,
+                        'rank': shelf.spider.get_rank(rank_type, data_type, page)
+                    }
+            response['status'] = 2000
+            response['msg'] = '获取排行榜信息成功!'
+            response['data'] = data
+        except ValueError as e:
+            response['status'] = 2002
+            response['msg'] = str(e)
+        return Response(response)
+
+
+class SearchView(APIView):
+    authentication_classes = (TokenAuthentication, )
+
+    def get(self, request):
+        response = {
+            'status': None,
+            'msg': None
+        }
+        keyword = request.query_params.get('keyword', None)
+        page = request.query_params.get('page', 1)
+        # 有就单独搜索,没有的话就在所有书架搜索
+        shelf_id = request.data.get('shelf_id', None)
+        data = {}
+        if keyword:
+            shelf_set = get_shelf(request, shelf_id)
+            try:
+                for shelf in shelf_set:
+                    if shelf.spider:
+                        data[shelf.id] = {
+                            'shelf_id': shelf.id,
+                            'shelf_title': shelf.shelf_title,
+                            'rank': shelf.spider.search_book(keyword, page)
+                        }
+                response['data'] = data
+            except ValueError as e:
+                response['status'] = 2002
+                response['msg'] = str(e)
+        else:
+            response['status'] = 3001
+            response['msg'] = '请输入关键词!'
+        return Response(response)
+
+
+class BookView(APIView):
+    """
+    书籍接口
+    get: 获取书籍详情信息,需要 shelf_id, book_id
+    post: 收藏&取消收藏书籍, 需要shelf_id, book_id
+    """
+    authentication_classes = (TokenAuthentication, )
+
+    def get(self, request):
+        response = {
+            'status': 4001,
+            'msg': '未找到书籍!'
+        }
+        book_id = request.data.get('book_id', None)
+        shelf_id = request.data.get('shelf_id', None)
+
+        if book_id and shelf_id:
+            # 只能获取一个书架的一本书
+            shelf = get_shelf(request, shelf_id)[0]
+            try:
+                if shelf.spider:
+                    response['status'] = 4000
+                    response['msg'] = '获取书籍信息成功'
+                    response['data'] = shelf.spider.get_book(book_id)
+            except ValueError as e:
+                response['status'] = 2001
+                response['msg'] = str(e)
+
+        return Response(response)
+
+    def post(self, request):
+        response = {
+            'status': 4001,
+            'msg': '未找到书籍!'
+        }
+        book_id = request.data.get('book_id', None)
+        shelf_id = request.data.get('shelf_id', None)
+        if book_id and shelf_id:
+            # 只能获取一个书架的一本书
+            shelf = get_shelf(request, shelf_id)[0]
+            try:
+                if shelf.spider:
+                    response = shelf.spider.favo_book(book_id)
+            except ValueError as e:
+                response['status'] = 2001
+                response['msg'] = str(e)
+
+        return Response(response)
+
+
+class ChapterView(APIView):
+    """
+    章节接口
+    get: 获取章节信息 需要shelf_id, book_id, chapter_id
+    post: 订阅章节 需要shelf_id, book_id, chapter_id
+    """
+    authentication_classes = (TokenAuthentication, )
+
+    def get(self, request):
+        # 获取章节信息
+        response = {
+            'status': 2001,
+            'msg': None
+        }
+        shelf_id = request.data.get('shelf_id')
+        book_id = request.data.get('book_id')
+        chapter_id = request.data.get('chapter_id')
+        if shelf_id and book_id and chapter_id:
+            # 必须传入shelf_id
+            shelf = get_shelf(request, shelf_id)[0]
+            try:
+                if shelf and shelf.spider:
+                    data = shelf.spider.get_chapter(chapter_id)
+                    response['status'] = 2000
+                    response['msg'] = '获取章节信息成功'
+                    response['data'] = data
+            except ValueError as e:
+                response['msg'] = str(e)
+        return Response(response)
+
+    def post(self, request):
+        # 订阅章节
+        response = {
+            'status': 2001,
+            'msg': None
+        }
+        shelf_id = request.data.get('shelf_id')
+        book_id = request.data.get('book_id')
+        chapter_id = request.data.get('chapter_id')
+        if shelf_id and book_id and chapter_id:
+            # 必须传入shelf_id
+            shelf = get_shelf(request, shelf_id)[0]
+            try:
+                if shelf and shelf.spider:
+                    data = shelf.spider.buy_chapter(book_id, chapter_id)
+                    response = data
+            except ValueError as e:
+                response['msg'] = str(e)
+        return Response(response)
+
+
+class LineCommentView(APIView):
+    """
+    间贴接口
+    get: 获取间贴, 需要shelf_id, chapter_id, count, index
+    post: 发送间贴, 需要shelf_id, chapter_id, book_id, index, line_content, tsukkomi_content
+    """
+    authentication_classes = (TokenAuthentication, )
+
+    def get(self, request):
+        """
+        获取间贴信息
+        :param request:
+        :return:
+        """
+        response = {
+            'status': 2001,
+            'msg': None
+        }
+        shelf_id = request.data.get('shelf_id')
+        chapter_id = request.data.get('chapter_id')
+        count = request.data.get('count', 10)
+        index = request.data.get('index')
+        if shelf_id and chapter_id and index:
+            # 必须传入shelf_id
+            shelf = get_shelf(request, shelf_id)[0]
+            try:
+                if shelf and shelf.spider:
+                    data = shelf.spider.get_line_comment(chapter_id, count, index)
+                    response['status'] = 1
+                    response['msg'] = '获取间贴信息成功'
+                    response['data'] = data
+            except ValueError as e:
+                response['msg'] = str(e)
+        return Response(response)
+
+    def post(self, request):
+        """
+        发送间贴信息
+        :param request:
+        :return:
+        """
+        response = {
+            'status': 2001,
+            'msg': '数据错误'
+        }
+        shelf_id = request.data.get('shelf_id')
+        book_id = request.data.get('book_id')
+        chapter_id = request.data.get('chapter_id')
+        index = request.data.get('index')
+        line_content = request.data.get('line_content')
+        tsukkomi_content = request.data.get('tsukkomi_content')
+        # 都不为空
+        if all((shelf_id, book_id, chapter_id, index, line_content, tsukkomi_content)):
+            shelf = get_shelf(request, shelf_id)[0]
+            try:
+                if shelf and shelf.spider:
+                    data = shelf.spider.send_line_comment(book_id, chapter_id, index,
+                                                          line_content, tsukkomi_content)
+                    response = data
+            except ValueError as e:
+                response['msg'] = str(e)
+        return Response(response)

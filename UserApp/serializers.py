@@ -21,4 +21,10 @@ class ShelfSerializer(ModelSerializer):
                   'account')
 
     def get_books(self, obj: Shelf):
-        return obj.books
+        data = None
+        try:
+            if obj.spider:
+                data = obj.spider.get_shelf()
+        except ValueError as e:
+            raise e
+        return data
