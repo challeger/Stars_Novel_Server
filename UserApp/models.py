@@ -2,6 +2,9 @@ from django.contrib.auth.models import AbstractBaseUser, PermissionsMixin, BaseU
 from shortuuidfield import ShortUUIDField
 from django.db import models
 
+from Novel_Server.utils.spiders import Spider_YouDu
+from Novel_Server.utils.spiders_setting import SPIDERS
+
 
 class UserManager(BaseUserManager):
     def _create_user(self, username, password, email, nickname, **kwargs):
@@ -95,7 +98,6 @@ class Shelf(models.Model):
     web_url = models.URLField(verbose_name='目标网站', choices=webs, default='https://www.qidian.com/')
     shelf_title = models.CharField(verbose_name='书架标题', default='我的书架', max_length=40)
     user = models.ForeignKey('NovelUser', on_delete=models.CASCADE, related_name='user_shelf')
-    books = models.ManyToManyField('Book', through='ShelfBookShip')
 
     def __str__(self):
         return self.shelf_title
@@ -120,42 +122,18 @@ class Shelf(models.Model):
         return cls.objects.create(account=account, password=password, web_url=web_url,
                                   shelf_title=shelf_title, user=user)
 
+    @property
+    def books(self):
+        try:
+            spider = globals()[SPIDERS[self.web_url]](self)
+            # 判断是否登录
+            if not spider.is_login:
+                spider.login()
+            data = spider.get_shelf()
+        except KeyError:
+            data = None
+        return data
+
     class Meta:
         verbose_name = '书架'
         verbose_name_plural = verbose_name
-
-
-# 书籍
-class Book(models.Model):
-    book_id = models.CharField(verbose_name='书籍id', max_length=50)
-    book_title = models.CharField(verbose_name='书籍标题', max_length=50, null=True)
-    book_cover = models.URLField(verbose_name='书籍封面',
-                                 default='http://alioss.youdubook.com/uploads/picturePlaceholder.jpg')
-    book_last_chapter = models.CharField(verbose_name='最新章节', max_length=100, null=True)
-    book_last_chapter_url = models.URLField(verbose_name='最新章节链接', null=True)
-
-    def __str__(self):
-        return self.book_title
-
-    @property
-    def last_chapter(self):
-        return {
-            'title': self.book_last_chapter,
-            'url': self.book_last_chapter_url
-        }
-
-    def read_history(self, shelf_id):
-        return self.book_ship.filter(shelf__id=shelf_id)
-
-    class Meta:
-        verbose_name = '书籍'
-        verbose_name_plural = verbose_name
-
-
-# 书架&书籍 多对多表
-class ShelfBookShip(models.Model):
-    shelf = models.ForeignKey('Shelf', on_delete=models.CASCADE, related_name='shelf_ship')
-    book = models.ForeignKey('Book', on_delete=models.CASCADE, related_name='book_ship')
-    date_joined = models.DateField(auto_now_add=True, verbose_name='收藏时间')
-    last_read = models.CharField(verbose_name='最后阅读章节', max_length=100, null=True)
-    last_read_url = models.URLField(verbose_name='最后阅读章节链接', null=True)
